@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# WhatsApp data — never commit any of this
+*.crypt12
+*.crypt14
+*.crypt15
+*.key
+*.bak
+*.db
+*.db-wal
+*.db-shm
+msgstore*
+Backups/
+Databases/
+chat_export_*/
+
+# Secrets
+pass*.txt
+*api*.txt
+.env
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.DS_Store
