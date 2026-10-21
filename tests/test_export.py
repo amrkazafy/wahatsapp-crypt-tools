@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 
 import pytest
+from wacrypt import ExportError, export_chats, list_chats, safe_name
 
-from wacrypt.ops import export as exportmod
 
 
 def _chats(conn):
-    return exportmod.list_chats(conn)
+    return list_chats(conn)
 
 
 def test_chats_are_listed_with_a_label_and_a_count(conn):
@@ -26,7 +26,7 @@ def test_chats_are_listed_with_a_label_and_a_count(conn):
 
 
 def test_txt(conn, tmp_path):
-    written = exportmod.export_chats(conn, _chats(conn), tmp_path / "out", "txt")
+    written = export_chats(conn, _chats(conn), tmp_path / "out", "txt")
     assert len(written) == 3
     text = (tmp_path / "out" / "3_Team.txt").read_text(encoding="utf-8")
     assert "Chat: Team" in text
@@ -35,14 +35,14 @@ def test_txt(conn, tmp_path):
 
 
 def test_csv(conn, tmp_path):
-    exportmod.export_chats(conn, _chats(conn), tmp_path / "out", "csv")
+    export_chats(conn, _chats(conn), tmp_path / "out", "csv")
     lines = (tmp_path / "out" / "3_Team.csv").read_text(encoding="utf-8").splitlines()
     assert lines[0] == "when,sender,text,mime,media_name"
     assert len(lines) == 2
 
 
 def test_json(conn, tmp_path):
-    exportmod.export_chats(conn, _chats(conn), tmp_path / "out", "json")
+    export_chats(conn, _chats(conn), tmp_path / "out", "json")
     bundle = json.loads((tmp_path / "out" / "chats.json").read_text(encoding="utf-8"))
     assert len(bundle) == 3
     self_chat = next(entry for entry in bundle if entry["chat"]["chat_row"] == 1)
@@ -51,7 +51,7 @@ def test_json(conn, tmp_path):
 
 
 def test_html(conn, tmp_path):
-    exportmod.export_chats(conn, _chats(conn), tmp_path / "out", "html")
+    export_chats(conn, _chats(conn), tmp_path / "out", "html")
     html = (tmp_path / "out" / "chats.html").read_text(encoding="utf-8")
     assert "<title>WhatsApp export" in html
     assert "note to self 0" in html
@@ -61,7 +61,7 @@ def test_html(conn, tmp_path):
 
 def test_html_survives_a_message_that_closes_the_script_tag(conn, tmp_path):
     """A chat containing '</script>' must not break out of the data block."""
-    from wacrypt.ops.export import _write_html
+    from wacrypt import _write_html
 
     bundle = [
         {
@@ -85,32 +85,32 @@ def test_html_survives_a_message_that_closes_the_script_tag(conn, tmp_path):
 
 def test_a_single_chat_selection(conn, tmp_path):
     chats = [chat for chat in _chats(conn) if chat.label == "Team"]
-    written = exportmod.export_chats(conn, chats, tmp_path / "one", "txt")
+    written = export_chats(conn, chats, tmp_path / "one", "txt")
     assert len(written) == 1
 
 
 def test_limit_keeps_the_tail(conn, tmp_path):
     chats = [chat for chat in _chats(conn) if chat.label.endswith("@s.whatsapp.net")]
-    exportmod.export_chats(conn, chats, tmp_path / "out", "json", limit=5)
+    export_chats(conn, chats, tmp_path / "out", "json", limit=5)
     bundle = json.loads((tmp_path / "out" / "chats.json").read_text(encoding="utf-8"))
     for entry in bundle:
         assert len(entry["messages"]) == 5
 
 
 def test_unknown_format_is_refused(conn, tmp_path):
-    with pytest.raises(exportmod.ExportError, match="unknown format"):
-        exportmod.export_chats(conn, _chats(conn), tmp_path, "pdf")
+    with pytest.raises(ExportError, match="unknown format"):
+        export_chats(conn, _chats(conn), tmp_path, "pdf")
 
 
 def test_no_chats_is_an_error(conn, tmp_path):
-    with pytest.raises(exportmod.ExportError, match="no chats"):
-        exportmod.export_chats(conn, [], tmp_path, "txt")
+    with pytest.raises(ExportError, match="no chats"):
+        export_chats(conn, [], tmp_path, "txt")
 
 
 def test_media_copy_is_opt_in_and_reports_missing_files(conn, tmp_path):
     root = tmp_path / "root"
     root.mkdir()
-    written = exportmod.export_chats(
+    written = export_chats(
         conn, _chats(conn), tmp_path / "out", "txt", media_root=root, include_media=True
     )
     # The fixture's media file does not exist on disk, so nothing is copied and
@@ -119,14 +119,14 @@ def test_media_copy_is_opt_in_and_reports_missing_files(conn, tmp_path):
 
 
 def test_missing_media_root_is_named(conn, tmp_path):
-    with pytest.raises(exportmod.ExportError, match="does not exist"):
-        exportmod.export_chats(
+    with pytest.raises(ExportError, match="does not exist"):
+        export_chats(
             conn, _chats(conn), tmp_path / "out", "txt",
             media_root=tmp_path / "nope", include_media=True,
         )
 
 
 def test_safe_name_strips_path_separators():
-    assert "/" not in exportmod.safe_name("a/b\\c:d")
-    assert exportmod.safe_name("   ") == "chat"
-    assert len(exportmod.safe_name("x" * 500)) == 80
+    assert "/" not in safe_name("a/b\\c:d")
+    assert safe_name("   ") == "chat"
+    assert len(safe_name("x" * 500)) == 80

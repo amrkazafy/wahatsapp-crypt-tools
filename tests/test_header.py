@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from wacrypt.core.header import (
+from wacrypt import (
+    CipherField,
     HeaderError,
     MetaField,
     PrefixField,
     build_prefix,
     decode_message,
     encode_varint,
+    patch_iv,
     patch_jid_suffix,
     parse_prefix,
     read_header,
@@ -76,7 +78,12 @@ class TestReadHeader:
         header = read_header(backup)
         assert header.crypt_type == 15
         assert header.jid_suffix == SUFFIX
-        assert header.iv == bytes(range(16))
+        # The fixture packs with a fresh nonce (see test_crypto), so what is
+        # pinned here is that the header carries one and that it is the same
+        # nonce the prefix advertises — the two disagreeing would make the
+        # backup undecryptable.
+        assert len(header.iv) == 16
+        assert header.iv in header.prefix
         assert header.cipher_offset == len(encode_varint(header.header_len)) + header.header_len
         assert header.cipher_size == header.file_size - header.cipher_offset - 32
 
@@ -147,3 +154,56 @@ class TestPatchJidSuffix:
         patched = patch_jid_suffix(header.prefix, "42")
         back = patch_jid_suffix(patched, SUFFIX)
         assert back == header.prefix
+
+
+class TestPatchIv:
+    """Re-encryption takes a new nonce, and the header has to follow it.
+
+    Two backups sealed under the same key with the same nonce but different
+    content let anyone holding both XOR the ciphertexts together — the failure
+    GCM is famous for.  So the nonce is regenerated per packing and written
+    back into the prefix, which is exactly where the reader takes it from.
+    """
+
+    def test_only_the_iv_changes(self, backup):
+        header = read_header(backup)
+        nonce = bytes(range(32, 48))
+        patched = patch_iv(header.prefix, nonce)
+
+        cipher = decode_message(patched)[PrefixField.E2EE_KEY_DATA][0][1]
+        assert decode_message(cipher)[CipherField.C15_IV][0][1] == nonce
+
+    def test_every_other_field_survives(self, backup):
+        header = read_header(backup)
+        nonce = bytes(range(32, 48))
+        patched = patch_iv(header.prefix, nonce)
+
+        # The nonce is fixed width, so nothing after it may shift.
+        assert len(patched) == len(header.prefix)
+
+        reparsed = parse_prefix(
+            patched, path=backup, file_size=0, header_len=len(patched), cipher_offset=0
+        )
+        assert reparsed.iv == nonce
+        assert reparsed.jid_suffix == header.jid_suffix
+        assert reparsed.app_version == header.app_version
+        assert reparsed.features == header.features
+        assert reparsed.backup_version == header.backup_version
+        assert reparsed.key_type == header.key_type
+        assert reparsed.key_type_new == header.key_type_new
+        assert reparsed.unknown_fields == header.unknown_fields
+
+    def test_the_same_nonce_twice_round_trips(self, backup):
+        header = read_header(backup)
+        assert patch_iv(patch_iv(header.prefix, bytes(16)), header.iv) == header.prefix
+
+    def test_a_short_iv_is_refused(self, backup):
+        header = read_header(backup)
+        with pytest.raises(HeaderError):
+            patch_iv(header.prefix, b"short")
+
+    def test_a_prefix_with_no_cipher_block_is_refused(self):
+        # There is nowhere to put a nonce, and inventing one would leave the
+        # header disagreeing with the ciphertext it describes.
+        with pytest.raises(HeaderError):
+            patch_iv(b"", bytes(16))

@@ -8,9 +8,14 @@ Manage, inspect, migrate and search WhatsApp local backups
 (`msgstore.db.crypt14` / `.crypt15`) — with **no `wa_crypt_tools` binaries**, no
 upload, and no guessing.
 
+**One file, one dependency.** The whole program is [`wacrypt.py`](wacrypt.py),
+and the only thing it imports that Python does not already provide is
+`cryptography` — because AES-256-GCM is the one thing stdlib will not do.
+No package layout to install, no template engine, no keyring, no cache.
+
 ```console
 $ wacrypt inspect msgstore.db.crypt15
-                   msgstore.db.crypt15
+msgstore.db.crypt15
   crypt type         crypt15
   WhatsApp version   2.26.40.73
   header jid suffix  22
@@ -18,8 +23,10 @@ $ wacrypt inspect msgstore.db.crypt15
   why                self chat: 815 sent, 1 received
   chats              13,171
   messages           199,381
+  earliest message   2019-07-24 18:40:46
+  latest message     2026-10-20 17:30:51
   attachments        64,827 (14.67 GB)
-  from cache         yes
+  database size      236.60 MB
 ```
 
 Everything runs locally. Your database, your key and your attachments are
@@ -29,46 +36,38 @@ never sent anywhere — this tool has no network code in it at all.
 
 ## Install
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e .
-```
-
-Or straight from GitHub, without cloning:
+The whole thing is one file:
 
 ```bash
-pip install "git+https://github.com/amrkazafy/whatsapp-crypt-tools.git"
+pip install cryptography
+python wacrypt.py info msgstore.db.crypt15
 ```
 
-Requires Python 3.9+. Dependencies: `cryptography`, `typer`, `rich`,
-`keyring`, `jinja2`.
+Or clone it and get the `wacrypt` command on your PATH:
 
 ```bash
-wacrypt --version   # wacrypt 0.1.0
+git clone https://github.com/amrkazafy/whatsapp-crypt-tools
+cd whatsapp-crypt-tools
+python3 -m venv .venv && .venv/bin/pip install .
+.venv/bin/wacrypt --version      # wacrypt 0.2.0
 ```
+
+Requires Python 3.9+. Dependency: `cryptography`. Nothing else — `typer`,
+`rich`, `keyring` and `jinja2` were dropped in 0.2.0 to keep the single-file
+promise.
 
 ## The key
 
 WhatsApp derives a key from the 64-hex-digit string shown under
 *Settings → Chats → End-to-end encrypted backup*, or stored in your
-`Databases/key` file. wacrypt will take it from, in order:
+`Databases/key` file. wacrypt takes it from, in order:
 
 1. `--key <hex or path>`
 2. `WACRYPT_KEY=<hex>`
-3. the macOS Keychain / system keyring — see `wacrypt vault set`
-4. an interactive prompt (hidden)
+3. an interactive prompt (hidden)
 
-```bash
-# store it once, stop pasting it everywhere
-WACRYPT_KEY="$(cat 'pass wh.txt')" wacrypt vault add
-
-wacrypt vault status
-#   key in keychain : yes (97a7bc…7d65)
-#   cached backups  : 2
-```
-
-(The six and four characters shown are the **key's** own hex, not a phone
-number — enough to tell two keys apart, useless for opening anything.)
+That is the whole list. The tool never writes the key anywhere, so there is no
+keychain entry to add and nothing to forget afterwards.
 
 ---
 
@@ -78,16 +77,16 @@ number — enough to tell two keys apart, useless for opening anything.)
 | --- | --- |
 | `info` | Read the header. Needs no key, touches only the first 64 KB. |
 | `inspect` | Owner number, chat/message counts, date range, footprint. |
-| `decrypt` | Write a plain SQLite database (mode `0600`, into the vault). |
+| `decrypt` | Write a plain SQLite database (mode `0600`). |
 | `encrypt` | Encrypt a plain database back into a crypt15 backup. |
 | `search` | Find messages without ever materialising a decrypted file. |
 | `export` | Write chats to HTML, JSON, CSV or plain text. |
 | `diff` | Say what changed between two backups. |
 | `migrate` | Change the number the backup belongs to. **Dry run by default.** |
 | `integrity` | Check the file's checksum and the database's structure. |
-| `vault` | The keychain key and the encrypted decryption cache. |
 
-Run `wacrypt <command> --help` for every option.
+Run `wacrypt <command> --help` for every option. Every `--json` flag turns the
+output into a machine-readable report.
 
 ### Search
 
@@ -110,9 +109,11 @@ wacrypt export msgstore.db.crypt15 --out ./chats --format txt --limit 500
 ```
 
 `html` produces a single self-contained file with client-side search over
-every message (89 MB for 199 k messages). The payload is JSON-encoded and
-every `<` in it is written as a JSON unicode escape, so no message can break
-out of the data block and into the page.
+every message (89 MB for 199 k messages). The markup is an inlined
+`string.Template`; chat content never touches it. Messages ride in as JSON
+under `<script type="application/json">`, and every `<` in that payload is
+written as a JSON unicode escape, so no message can break out of the data
+block and into the page.
 
 ### Migrate
 
@@ -133,19 +134,19 @@ migration plan  99900011122 → 99900077733 (header suffix 22 → 33)
   tables scanned     : 300
   restore-critical   : 272 row(s)  always rewritten
   chat content       : 674 row(s)  left alone (pass --rewrite-text to include)
- applies  table             column        kind             rows
- yes      message_media     file_path     attachment path   147
- yes      message_media     media_name    attachment path   125
- no       message           text_data     chat content      603
- …
+
+  applies  table             column        kind             rows
+  yes      message_media     file_path     attachment path   147
+  yes      message_media     media_name    attachment path   125
+  no       message           text_data     chat content      603
+  …
 ```
 
 What it guarantees:
 
 * **The original is never touched.** The migration runs on a copy of the
   decrypted database and writes a *new* `*_migrated.crypt15`. It refuses to
-  overwrite the input file, and it never mutates the cached database either —
-  or every later command would inherit the change.
+  overwrite the input file.
 * **A prefix is never a match.** `99900011122` does not touch
   `999000111220` (someone else's account), and `99900011122` does not touch a
   shorter neighbour. Rows are selected with a broad anchor, then filtered and
@@ -156,9 +157,13 @@ What it guarantees:
   the account's JID rows and the paths attachments are stored under — is
   rewritten by default. The 603 messages that merely quote the number are
   reported but left alone unless you pass `--rewrite-text`.
-* **The header keeps everything but the suffix.** The IV, app version,
-  feature flags, backup version and every unknown field survive; a no-op patch
-  round-trips byte-identically.
+* **The header keeps everything but the suffix.** App version, feature flags,
+  backup version and every unknown field survive; a no-op patch round-trips
+  byte-identically.
+* **The nonce is regenerated.** The output is sealed under a fresh AES-GCM IV,
+  written back into the prefix where the reader takes it from. (Reusing the
+  original's nonce over changed content is the classic GCM failure — see
+  [0.2.0](CHANGELOG.md).)
 * **The header suffix is derived, not assumed** — it is the last two digits of
   the new number, and it is verified by re-reading the file afterwards.
 * **Collisions stop you.** If the target number already exists as a contact in
@@ -175,7 +180,7 @@ wacrypt diff old.crypt15 new.crypt15
 
 Chats are matched on `key_id` when both sides have it, falling back to a
 content fingerprint when they do not, so a renamed chat is reported as
-*renamed* rather than as one deletion plus one addition.
+*renamed* rather as one deletion plus one addition.
 
 ---
 
@@ -190,8 +195,8 @@ private chat where one side wrote hundreds of messages and the other replied
 once.
 
 ```
-self chat: 815 sent, 1 received   →  high confidence
-private chat: 270 sent, 215 received  →  a conversation, not you
+self chat: 815 sent, 1 received      →  high confidence
+private chat: 270 sent, 215 received →  a conversation, not you
 ```
 
 The header suffix is recorded as a *reason* but is never enough on its own, so
@@ -228,18 +233,16 @@ layer. They are separated by checking the cheap, unambiguous things first.
 
 ---
 
-## Decrypted databases are not left lying around
+## Nothing outlives the command that needed it
 
-`decrypt` writes to `0600`, but `search`, `inspect` and `export` never need a
-plaintext file at all — they open the decrypted database straight out of an
-**AES-256-GCM encrypted cache** whose key lives only in the keychain. The
-plaintext copy exists for exactly as long as one command runs.
+Every command that has to look inside the database decrypts into a temporary
+directory and removes it on the way out — including on Ctrl-C and on error.
+There is no cache to purge, no session directory to audit, and no decrypted
+file for a later command to inherit.
 
-```bash
-wacrypt vault status     # what is cached, and how big
-wacrypt vault purge      # remove every cached database
-wacrypt vault purge --all
-```
+`decrypt` is the one command that writes a database you keep, and it does so
+with mode `0600`, through a `.partial` file so an interrupted run can never
+leave a truncated database where a complete one is expected.
 
 ---
 
@@ -271,15 +274,19 @@ because the header is a handful of fields and the dependency is not worth it.
 .venv/bin/python -m pytest -q
 ```
 
-175 tests, all against a synthetic database built in a temporary directory —
-no test reads or writes a real backup, touches the real keychain, or leaves
-anything behind. The safety-critical cases have their own regression tests:
+143 tests, all against a synthetic database built in a temporary directory —
+no test reads or writes a real backup, and nothing is left behind. The
+safety-critical cases have their own regression tests:
 
 * `99900011122` must leave `999000111220` alone, in every column, including a
   row that contains *both*.
 * A wrong key and a corrupt file must fail with different messages.
 * A no-op header patch must be byte-identical.
 * Planning must not write a single row.
+* Two packings of the same database must not share a nonce, and the header
+  must advertise whichever one was actually used.
+
+Run on every push across Python 3.9–3.12 on Linux and macOS.
 
 ---
 
@@ -287,7 +294,7 @@ anything behind. The safety-critical cases have their own regression tests:
 
 This tool contains no network code. It does not phone home, does not collect
 telemetry, and does not upload your data. Backups, keys and exports stay on
-your disk.
+your disk. The key is never written to disk by this program in any form.
 
 ---
 

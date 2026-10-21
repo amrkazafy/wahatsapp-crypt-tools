@@ -3,8 +3,10 @@
 How a WhatsApp local `msgstore.db.crypt15` is laid out, and exactly which
 parts wacrypt has verified byte for byte.
 
-Everything here is documented from `src/wacrypt/core/header.py` and
-`src/wacrypt/core/crypto.py`, which is where it is implemented.
+Everything here is documented from [`wacrypt.py`](../wacrypt.py), where it is
+implemented: the protobuf reader and the header classes sit in the
+`BackupPrefix` / `parse_prefix` section, and the cipher in `pack_from_file` /
+`unpack_to_file`.
 
 ---
 

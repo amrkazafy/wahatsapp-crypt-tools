@@ -10,18 +10,20 @@ import stat
 
 import pytest
 
-from wacrypt.core.crypto import (
+from wacrypt import (
+    BackupHeader,
     CorruptedBackup,
     WrongKey,
+    build_prefix,
     derive_backup_key,
     encryption_loop,
     iter_decrypted,
     iter_plaintext,
     pack_from_file,
+    read_header,
     sniff_payload,
     unpack_to_file,
 )
-from wacrypt.core.header import read_header
 
 
 class TestKeySchedule:
@@ -128,8 +130,6 @@ class TestFailureModes:
 
 class TestReEncryption:
     def test_a_repacked_backup_opens_again(self, plain_db, aes_key, tmp_path, backup):
-        from wacrypt.core.header import build_prefix, BackupHeader
-
         header = BackupHeader(
             path=plain_db,
             file_size=0,
@@ -152,6 +152,50 @@ class TestReEncryption:
         data = repacked.read_bytes()
         assert hashlib.md5(data[:-16]).digest() == data[-16:]
 
+    def test_a_fresh_nonce_is_used_every_time(self, plain_db, aes_key, tmp_path, backup):
+        """Re-encrypting a *different* database under the same key and nonce
+        is the classic GCM failure: XORing the two ciphertexts together is
+        enough to start recovering the GHASH key.  So every packing takes a
+        new one, even when it is handed the very same header."""
+        header = read_header(backup)
+        first, second = tmp_path / "a.crypt15", tmp_path / "b.crypt15"
+
+        pack_from_file(plain_db, aes_key, first, header)
+        pack_from_file(plain_db, aes_key, second, header)
+
+        assert read_header(first).iv != read_header(second).iv
+
+    def test_the_header_advertises_the_nonce_that_was_used(
+        self, plain_db, aes_key, tmp_path, backup
+    ):
+        """The reader takes the IV from the prefix, so the two can never
+        disagree — and the written one must be the new nonce, not the one the
+        caller's header happened to carry."""
+        header = read_header(backup)
+        repacked = tmp_path / "repacked.crypt15"
+        pack_from_file(plain_db, aes_key, repacked, header)
+
+        written = read_header(repacked)
+        assert written.iv != header.iv
+        assert written.iv in written.prefix
+
+    def test_an_explicit_iv_is_honoured(self, plain_db, aes_key, tmp_path, backup):
+        """`--reuse-iv` still has to work: naming a nonce pins it, and the
+        prefix is rewritten to match so the file stays decryptable."""
+        header = read_header(backup)
+        nonce = bytes(range(32, 48))
+        pinned = tmp_path / "pinned.crypt15"
+
+        pack_from_file(plain_db, aes_key, pinned, header, iv=nonce)
+
+        written = read_header(pinned)
+        assert written.iv == nonce
+        assert written.iv in written.prefix
+
+        again = tmp_path / "pinned.db"
+        unpack_to_file(pinned, aes_key, again)
+        assert again.read_bytes() == plain_db.read_bytes()
+
     def test_the_payload_is_actually_compressed(self, plain_db, aes_key, tmp_path, backup):
         """WhatsApp zips before encrypting.  A ciphertext larger than the
         database itself would mean we quietly stopped doing that."""
@@ -159,10 +203,8 @@ class TestReEncryption:
         assert header.cipher_size < plain_db.stat().st_size
 
     def test_refuses_a_bad_key_length(self, plain_db, tmp_path, backup):
-        from wacrypt.core.header import read_header as _read
-
         with pytest.raises(WrongKey):
-            pack_from_file(plain_db, b"short", tmp_path / "x.crypt15", _read(backup))
+            pack_from_file(plain_db, b"short", tmp_path / "x.crypt15", read_header(backup))
 
 
 def test_modes_are_not_interchangeable(tmp_path):

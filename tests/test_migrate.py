@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import pytest
 
-from wacrypt.core import db as dbmod
-from wacrypt.ops.migrate import (
+from wacrypt import (
     MigrationError,
     apply_migration,
     plan_migration,
     rename_media_directories,
     sanitize_number,
 )
+from wacrypt import count, open_db
 
 OWNER = "99900011122"
 CONFUSABLE = "999000111220"
@@ -25,7 +25,7 @@ NEW = "99900077733"
 
 @pytest.fixture()
 def rw(writable):
-    conn = dbmod.open_db(writable, read_only=False)
+    conn = open_db(writable, read_only=False)
     try:
         yield conn
     finally:
@@ -106,7 +106,7 @@ class TestApply:
                                   (OWNER, NEW))
         }
         assert users == {NEW}
-        assert dbmod.count(rw, "jid", "user = ?", (OWNER,)) == 0
+        assert count(rw, "jid", "user = ?", (OWNER,)) == 0
 
     def test_device_suffixes_are_preserved(self, rw):
         apply_migration(rw, plan_migration(rw, OWNER, NEW))
@@ -120,8 +120,8 @@ class TestApply:
         """The regression test.  A prefix-matching implementation fails here."""
         apply_migration(rw, plan_migration(rw, OWNER, NEW, include_text=True))
 
-        assert dbmod.count(rw, "jid", "user = ?", (CONFUSABLE,)) == 1
-        assert dbmod.count(rw, "jid", "user = ?", (NEW,)) == 2
+        assert count(rw, "jid", "user = ?", (CONFUSABLE,)) == 1
+        assert count(rw, "jid", "user = ?", (NEW,)) == 2
 
         media = rw.execute("SELECT media_caption FROM message_media").fetchone()[0]
         assert f"{CONFUSABLE}@s.whatsapp.net" in media
@@ -153,19 +153,19 @@ class TestApply:
         way round, or a ``REPLACE`` on a substring, would).
         """
         shorter = OWNER[:10]
-        assert dbmod.count(rw, "jid", "user = ?", (shorter,)) == 1, "fixture"
+        assert count(rw, "jid", "user = ?", (shorter,)) == 1, "fixture"
         before = rw.execute(
             "SELECT user, raw_string FROM jid WHERE user = ?", (shorter,)
         ).fetchone()
 
         apply_migration(rw, plan_migration(rw, OWNER, NEW))
 
-        assert dbmod.count(rw, "jid", "user = ?", (shorter,)) == 1
+        assert count(rw, "jid", "user = ?", (shorter,)) == 1
         assert rw.execute(
             "SELECT user, raw_string FROM jid WHERE user = ?", (shorter,)
         ).fetchone() == before, "the ten-digit neighbour was rewritten"
         # …and no copy of it was manufactured under the new number either.
-        assert dbmod.count(rw, "jid", "user = ?", (NEW[:10],)) == 0
+        assert count(rw, "jid", "user = ?", (NEW[:10],)) == 0
 
     def test_database_survives(self, rw):
         apply_migration(rw, plan_migration(rw, OWNER, NEW))
@@ -174,7 +174,7 @@ class TestApply:
         joined = rw.execute(
             "SELECT COUNT(*) FROM chat c JOIN jid j ON j._id = c.jid_row_id"
         ).fetchone()[0]
-        assert joined == dbmod.count(rw, "chat")
+        assert joined == count(rw, "chat")
 
     def test_an_empty_plan_refuses_to_run(self, rw):
         plan = plan_migration(rw, "12345678901", NEW)
@@ -230,8 +230,8 @@ class TestContentScope:
 
     def test_identity_rows_are_always_applied(self, rw):
         apply_migration(rw, plan_migration(rw, OWNER, NEW))
-        assert dbmod.count(rw, "jid", "user = ?", (OWNER,)) == 0
-        assert dbmod.count(rw, "jid", "user = ?", (NEW,)) == 2
+        assert count(rw, "jid", "user = ?", (OWNER,)) == 0
+        assert count(rw, "jid", "user = ?", (NEW,)) == 2
 
     def test_the_split_survives_serialisation(self, rw):
         payload = plan_migration(rw, OWNER, NEW).as_dict()
@@ -301,9 +301,9 @@ class TestMediaDirectories:
 
 def _snapshot(conn):
     return {
-        "jid": dbmod.count(conn, "jid"),
-        "chat": dbmod.count(conn, "chat"),
-        "message": dbmod.count(conn, "message"),
+        "jid": count(conn, "jid"),
+        "chat": count(conn, "chat"),
+        "message": count(conn, "message"),
         "users": sorted(
             row[0] for row in conn.execute("SELECT user FROM jid ORDER BY _id")
         ),

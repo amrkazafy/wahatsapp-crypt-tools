@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from wacrypt.core import db as dbmod
-from wacrypt.ops import diff as diffmod
-from wacrypt.ops.migrate import apply_migration, plan_migration
+from wacrypt import apply_migration, plan_migration
+from wacrypt import diff_backups, open_db
 
 OWNER = "99900011122"
 NEW = "99900077733"
@@ -29,7 +28,7 @@ def second(writable):
 @pytest.fixture()
 def conn1(writable):
     """A writable copy of the fixture database (``conn`` is read-only)."""
-    database = dbmod.open_db(writable, read_only=False)
+    database = open_db(writable, read_only=False)
     try:
         yield database
     finally:
@@ -38,7 +37,7 @@ def conn1(writable):
 
 @pytest.fixture()
 def conn2(second):
-    database = dbmod.open_db(second, read_only=False)
+    database = open_db(second, read_only=False)
     try:
         yield database
     finally:
@@ -46,7 +45,7 @@ def conn2(second):
 
 
 def test_identical_backups_report_nothing(conn, conn2):
-    result = diffmod.diff_backups(conn, conn2, "a", "b")
+    result = diff_backups(conn, conn2, "a", "b")
     assert result.total_added == 0
     assert result.total_removed == 0
     assert result.chats == []
@@ -59,7 +58,7 @@ def test_a_new_message_is_counted(conn, conn2):
     )
     conn2.commit()
 
-    result = diffmod.diff_backups(conn, conn2, "a", "b")
+    result = diff_backups(conn, conn2, "a", "b")
     assert result.total_added == 1
     assert result.total_removed == 0
     (changed,) = result.changed_chats
@@ -71,7 +70,7 @@ def test_a_removed_message_is_counted(conn, conn2):
     conn2.execute("DELETE FROM message WHERE key_id = 'f0'")
     conn2.commit()
 
-    result = diffmod.diff_backups(conn, conn2, "a", "b")
+    result = diff_backups(conn, conn2, "a", "b")
     assert result.total_removed == 1
     assert result.total_added == 0
 
@@ -79,7 +78,7 @@ def test_a_removed_message_is_counted(conn, conn2):
 def test_a_whole_chat_appearing_and_disappearing(conn, conn2):
     apply_migration(conn2, plan_migration(conn2, OWNER, NEW))
 
-    result = diffmod.diff_backups(conn, conn2, "a", "b")
+    result = diff_backups(conn, conn2, "a", "b")
     assert len(result.new_chats) == 1
     assert len(result.removed_chats) == 1
     assert result.new_chats[0].jid == f"{NEW}@s.whatsapp.net"
@@ -91,13 +90,13 @@ def test_a_whole_chat_appearing_and_disappearing(conn, conn2):
 
 
 def test_the_key_source_is_reported(conn, conn2):
-    assert diffmod.diff_backups(conn, conn2, "a", "b").key_source == "key_id"
+    assert diff_backups(conn, conn2, "a", "b").key_source == "key_id"
 
 
 def test_the_key_source_degrades_when_key_id_is_absent(conn1, conn2):
     conn1.execute("ALTER TABLE message RENAME COLUMN key_id TO something_else")
     conn1.commit()
-    result = diffmod.diff_backups(conn1, conn2, "a", "b")
+    result = diff_backups(conn1, conn2, "a", "b")
     assert result.key_source == "text"
 
 
@@ -109,12 +108,12 @@ def test_the_limit_is_applied(conn, conn2):
             (2000000000000 + index, f"bulk{index}"),
         )
     conn2.commit()
-    result = diffmod.diff_backups(conn, conn2, "a", "b", limit=1)
+    result = diff_backups(conn, conn2, "a", "b", limit=1)
     assert len(result.chats) == 1
 
 
 def test_results_serialise(conn, conn2):
-    payload = diffmod.diff_backups(conn, conn2, "a", "b").as_dict()
+    payload = diff_backups(conn, conn2, "a", "b").as_dict()
     assert payload["old"] == "a"
     assert payload["new"] == "b"
     assert payload["chats"] == []

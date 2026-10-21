@@ -12,13 +12,9 @@ import sqlite3
 import time
 from pathlib import Path
 
-import keyring
-import keyring.errors
 import pytest
 
-from wacrypt.core import keys as keysmod
-from wacrypt.core.crypto import derive_backup_key, pack_from_file, unpack_to_file
-from wacrypt.core.header import build_prefix, read_header
+from wacrypt import build_prefix, derive_backup_key, pack_from_file, read_header, unpack_to_file
 
 # A fixed root key so failures reproduce.  This is a test key, never a real one.
 TEST_ROOT_KEY = bytes(range(32))
@@ -186,7 +182,7 @@ def backup(plain_db, tmp_path_factory, root_key) -> Path:
 
 
 def _fixture_header(plain_db: Path):
-    from wacrypt.core.header import BackupHeader
+    from wacrypt import BackupHeader
 
     prefix = test_header()
     return BackupHeader(
@@ -238,33 +234,10 @@ def key_hex() -> str:
     return TEST_ROOT_KEY.hex()
 
 
-# Keep the package importable when pytest is run from a bare checkout, and
-# keep the tests hermetic: they must never read or write the developer's real
-# macOS Keychain, and must never see a real cache directory.
-class _MemoryKeyring:
-    """An in-memory stand-in for the platform keychain."""
-
-    def __init__(self) -> None:
-        self._store = {}
-
-    def get_password(self, service, name):
-        return self._store.get((service, name))
-
-    def set_password(self, service, name, password):
-        self._store[(service, name)] = password
-
-    def delete_password(self, service, name):
-        if (service, name) not in self._store:
-            raise keyring.errors.PasswordDeleteError(name)
-        del self._store[(service, name)]
-
-
+# Keep the tests hermetic.  The tool reads the key from --key, $WACRYPT_KEY or
+# an interactive prompt, so a key exported in the developer's shell would
+# otherwise follow the suite around; every test must start from nothing and
+# must never reach for anything outside the temp directory pytest hands out.
 @pytest.fixture(autouse=True)
-def _isolated_environment(tmp_path, monkeypatch):
-    monkeypatch.setenv("WACRYPT_HOME", str(tmp_path / "vault-home"))
+def _isolated_environment(monkeypatch):
     monkeypatch.delenv("WACRYPT_KEY", raising=False)
-    store = _MemoryKeyring()  # one instance, so get/set see the same dict
-    monkeypatch.setattr(keyring, "set_keyring", lambda backend: None)
-    monkeypatch.setattr(keyring, "get_password", store.get_password)
-    monkeypatch.setattr(keyring, "set_password", store.set_password)
-    monkeypatch.setattr(keyring, "delete_password", store.delete_password)

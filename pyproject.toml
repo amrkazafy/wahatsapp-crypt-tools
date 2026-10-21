@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wacrypt"
-version = "0.1.0"
+version = "0.2.0"
 description = "Manage, inspect, migrate and search WhatsApp local backups (crypt14/crypt15)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,13 +24,11 @@ classifiers = [
     "Topic :: Security :: Cryptography",
     "Topic :: Utilities",
 ]
-dependencies = [
-    "cryptography>=41",
-    "typer>=0.12",
-    "rich>=13",
-    "keyring>=24",
-    "jinja2>=3",
-]
+# One dependency, and it is the one Python cannot do for us: AES-256-GCM.
+# Everything else the tool needs — argparse, tables, progress, the HTML
+# template — ships with the standard library, which is what lets wacrypt.py
+# stay a single file you can just download and run.
+dependencies = ["cryptography>=41"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.8"]
@@ -39,13 +37,11 @@ dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.8"]
 Homepage = "https://github.com/amrkazafy/whatsapp-crypt-tools"
 
 [project.scripts]
-wacrypt = "wacrypt.cli:main"
+wacrypt = "wacrypt:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-wacrypt = ["export_templates/*.html.j2", "export_templates/*.css"]
+# The program is one module at the repository root, not a package.
+[tool.setuptools]
+py-modules = ["wacrypt"]
 
 [tool.ruff]
 line-length = 100
@@ -57,3 +53,6 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# wacrypt.py lives at the repository root, so `import wacrypt` needs that root
+# on the path when pytest is run from a bare checkout.
+pythonpath = ["."]
