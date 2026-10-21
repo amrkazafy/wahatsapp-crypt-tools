@@ -36,7 +36,7 @@ dependencies = [
 dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.8"]
 
 [project.urls]
-Homepage = "https://github.com/amrkazafy/wahatsapp-crypt-tools"
+Homepage = "https://github.com/amrkazafy/whatsapp-crypt-tools"
 
 [project.scripts]
 wacrypt = "wacrypt.cli:main"

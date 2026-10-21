@@ -1,5 +1,9 @@
 # wacrypt
 
+[![tests](https://github.com/amrkazafy/whatsapp-crypt-tools/actions/workflows/test.yml/badge.svg)](https://github.com/amrkazafy/whatsapp-crypt-tools/actions/workflows/test.yml)
+[![python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+[![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+
 Manage, inspect, migrate and search WhatsApp local backups
 (`msgstore.db.crypt14` / `.crypt15`) — with **no `wa_crypt_tools` binaries**, no
 upload, and no guessing.
@@ -30,8 +34,18 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
+Or straight from GitHub, without cloning:
+
+```bash
+pip install "git+https://github.com/amrkazafy/whatsapp-crypt-tools.git"
+```
+
 Requires Python 3.9+. Dependencies: `cryptography`, `typer`, `rich`,
 `keyring`, `jinja2`.
+
+```bash
+wacrypt --version   # wacrypt 0.1.0
+```
 
 ## The key
 
@@ -46,12 +60,15 @@ WhatsApp derives a key from the 64-hex-digit string shown under
 
 ```bash
 # store it once, stop pasting it everywhere
-wacrypt vault set --key-file "pass wh.txt"
+WACRYPT_KEY="$(cat 'pass wh.txt')" wacrypt vault add
 
 wacrypt vault status
-#   key in keychain : yes (96599238…)
+#   key in keychain : yes (97a7bc…7d65)
 #   cached backups  : 2
 ```
+
+(The six and four characters shown are the **key's** own hex, not a phone
+number — enough to tell two keys apart, useless for opening anything.)
 
 ---
 
@@ -271,6 +288,22 @@ anything behind. The safety-critical cases have their own regression tests:
 This tool contains no network code. It does not phone home, does not collect
 telemetry, and does not upload your data. Backups, keys and exports stay on
 your disk.
+
+---
+
+## Limitations
+
+* **crypt14 is best-effort.** Its field numbers are implemented from the
+  published schema, but have never been exercised against a real crypt14
+  file. Crypt15 is the path with a real backup behind it.
+* **`chat.group_type` is never used as a filter.** On current schemas doing
+  so hides real private chats, so owner detection does not touch it.
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ---
 

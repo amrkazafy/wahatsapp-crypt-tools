@@ -46,6 +46,26 @@ app = typer.Typer(
 vault_app = typer.Typer(help="Manage the stored key and the decrypted cache.", no_args_is_help=True)
 app.add_typer(vault_app, name="vault")
 
+
+def _show_version(value: bool) -> None:
+    if value:
+        console.print(f"wacrypt {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_show_version,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    """Manage, inspect, migrate and search WhatsApp local backups."""
+
 console = Console()
 err_console = Console(stderr=True)
 
